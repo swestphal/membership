@@ -2,12 +2,13 @@ from django.shortcuts import render, get_object_or_404, redirect
 from .forms import CustomSignupForm
 from django.urls import reverse_lazy
 from django.views import generic
-from .models import FitnessPlan
+from .models import FitnessPlan, Customer
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.decorators import login_required
 from .local_settings import *
-#from django.conf import *
+# from django.conf import *
 import stripe
+stripe.api_key = 'sk_test_51IVftGLPI9sBME3LFpz1gf3UVbTvLQny7plS5XByam2Pl8Gz99LLeh5bchgRKvXev3q0qFIRsaM3faLkjF4kaWIn00hhbRyf2r'
 
 
 def home(request):
@@ -36,6 +37,41 @@ def checkout(request):
     }
     plan = ''
     if request.method == 'POST':
+        stripe_customer = stripe.Customer.create(
+            email=request.user.email, source=request.POST['stripeToken']
+        )
+        plan = 'price_1IVfxYLPI9sBME3L9uRGhWxQ'
+        if request.POST['plan'] == 'yearly':
+            plan = 'price_1IVfy1LPI9sBME3L4uTCici3'
+        if request.POST['coupon'] in coupons:
+            # coupon
+            percentage = coupons[request.POST['coupon'].lower()]
+            try:
+                coupon = stripe.Coupon.create(
+                    duration='once', id=request.POST['coupon'].lower(),
+                    percent_off=percentage
+                )
+            except:
+                pass
+            subscription = stripe.Subscription.create(
+                customer=stripe_customer.id,
+                items=[{'plan': plan}],
+                coupon=request.POST['coupon'].lower()
+            )
+        else:
+            # no coupon
+            subscription = stripe.Subscription.create(
+                customer=stripe_customer.id,
+                items=[{'plan': plan}]
+            )
+
+        customer = Customer()
+        customer.user = request.user
+        customer.stripeid = stripe_customer.id
+        customer.membership = True
+        customer.cancel_at_period_end = False
+        customer.stripe_subscription_id = subscription.id
+        customer.save()
         return redirect('home')
     else:
         coupon = 'none'
@@ -57,8 +93,8 @@ def checkout(request):
                 coupon_price = int((percentage / 100) * price)
                 price = price - coupon_price
                 coupon_dollar = str(coupon_price)[
-                    :2] + '.'+str(coupon_price)[-2:]
-                final_dollar = str(price)[:-2]+'.'+str(price)[-2:]
+                    : 2] + '.'+str(coupon_price)[-2:]
+                final_dollar = str(price)[: -2]+'.'+str(price)[-2:]
         return render(request, 'plans/checkout.html', {
             'plan': plan,
             'coupon': coupon,
